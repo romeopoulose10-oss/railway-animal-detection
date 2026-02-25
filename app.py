@@ -2,7 +2,6 @@ from flask import Flask, render_template, Response, request, redirect, url_for, 
 import cv2
 from ultralytics import YOLO
 import time
-import winsound
 import requests
 
 app = Flask(__name__)
@@ -138,4 +137,5 @@ def status():
     }
 
 if __name__ == "__main__":
+
     app.run(host="0.0.0.0", port=5000, debug=True)
