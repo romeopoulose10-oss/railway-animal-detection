@@ -1,55 +1,71 @@
-from flask import Flask, render_template, Response, request, redirect, url_for, session
+import os
 import cv2
-from ultralytics import YOLO
 import time
 import requests
+from flask import Flask, render_template, Response, request, redirect, url_for, session
+from ultralytics import YOLO
+
+# ---------------- ENV CHECK ----------------
+RENDER = os.getenv("RENDER") is not None
 
 app = Flask(__name__)
-app.secret_key = "railway_ai_secret"   # 🔐 session key
+app.secret_key = "railway_ai_secret"
 
-# ---------------- LOGIN CREDENTIALS ----------------
+# ---------------- LOGIN ----------------
 USERNAME = "stationmaster"
 PASSWORD = "railway123"
 
-# 📩 FAST2SMS SETUP
+# ---------------- SMS CONFIG ----------------
 FAST2SMS_API_KEY = "YOUR_API_KEY"
 STATION_MASTER_NUMBER = "9061642481,9072214249"
 
 def send_sms_fast2sms(object_name):
-    url = "https://www.fast2sms.com/dev/bulk"
-    payload = {
-        "sender_id": "TXTIND",
-        "message": f"🚨 ALERT! Obstacle detected: {object_name}",
-        "language": "english",
-        "route": "p",
-        "numbers": STATION_MASTER_NUMBER
-    }
-    headers = {
-        "authorization": FAST2SMS_API_KEY,
-        "Content-Type": "application/x-www-form-urlencoded"
-    }
+    if RENDER:
+        return  # ❌ disable SMS in cloud demo
     try:
-        requests.post(url, data=payload, headers=headers, timeout=5)
+        requests.post(
+            "https://www.fast2sms.com/dev/bulk",
+            data={
+                "sender_id": "TXTIND",
+                "message": f"🚨 ALERT! Obstacle detected: {object_name}",
+                "language": "english",
+                "route": "p",
+                "numbers": STATION_MASTER_NUMBER
+            },
+            headers={"authorization": FAST2SMS_API_KEY},
+            timeout=5
+        )
     except:
         pass
 
-# 🔔 GLOBAL STATUS
+# ---------------- GLOBAL STATE ----------------
 alert_status = "SAFE"
 last_detected_object = "None"
 sms_sent = False
 
-# Load YOLO model
-model = YOLO("yolov8n.pt")
+# ---------------- LOAD MODEL (LOCAL ONLY) ----------------
+model = None
+cap = None
 
-# Camera
-camera_url = "http://10.143.96.43:8080/video"
-cap = cv2.VideoCapture(camera_url)
+if not RENDER:
+    model = YOLO("yolov8n.pt")
+    camera_url = "http://10.143.96.43:8080/video"
+    cap = cv2.VideoCapture(camera_url)
+    print("📷 Camera enabled (Local)")
+else:
+    print("☁️ Running on Render → Camera disabled")
 
 danger_objects = ["cow", "dog", "horse", "elephant", "person", "car", "truck", "bus"]
-last_beep_time = 0
 
+# ---------------- VIDEO STREAM ----------------
 def generate_frames():
-    global last_beep_time, alert_status, last_detected_object, sms_sent
+    global alert_status, last_detected_object, sms_sent
+
+    if RENDER or cap is None:
+        while True:
+            time.sleep(1)
+            yield b""
+        return
 
     while True:
         success, frame = cap.read()
@@ -71,20 +87,14 @@ def generate_frames():
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
                     cv2.putText(frame, f"WARNING: {label.upper()}",
                                 (x1, y1 - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                                (0, 0, 255), 2)
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
         if detected:
             alert_status = "DANGER"
             last_detected_object = label
-
             if not sms_sent:
                 send_sms_fast2sms(label)
                 sms_sent = True
-
-            if time.time() - last_beep_time > 2:
-                winsound.Beep(1000, 300)
-                last_beep_time = time.time()
         else:
             alert_status = "SAFE"
             last_detected_object = "None"
@@ -96,20 +106,14 @@ def generate_frames():
                buffer.tobytes() + b"\r\n")
 
 # ---------------- ROUTES ----------------
-
 @app.route("/", methods=["GET", "POST"])
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        user = request.form["username"]
-        pwd = request.form["password"]
-
-        if user == USERNAME and pwd == PASSWORD:
+        if request.form["username"] == USERNAME and request.form["password"] == PASSWORD:
             session["logged_in"] = True
             return redirect(url_for("station"))
-        else:
-            return render_template("login.html", error="Invalid Login")
-
+        return render_template("login.html", error="Invalid Login")
     return render_template("login.html")
 
 @app.route("/logout")
@@ -126,7 +130,7 @@ def station():
 @app.route("/video")
 def video():
     return Response(generate_frames(),
-                    mimetype="multipart/x-mixed-replace; boundary=frame")
+        mimetype="multipart/x-mixed-replace; boundary=frame")
 
 @app.route("/status")
 def status():
@@ -136,6 +140,7 @@ def status():
         "time": time.strftime("%H:%M:%S")
     }
 
+# ---------------- RUN ----------------
 if __name__ == "__main__":
-
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
