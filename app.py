@@ -49,7 +49,7 @@ cap = None
 
 if not RENDER:
     model = YOLO("yolov8n.pt")
-    camera_url = "http://10.143.96.43:8080/video"
+    camera_url = "http://10.159.192.219:8080/video"
     cap = cv2.VideoCapture(camera_url)
     print("📷 Camera enabled (Local)")
 else:
@@ -144,3 +144,4 @@ def status():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
